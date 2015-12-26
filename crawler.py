@@ -42,13 +42,15 @@ class TwitterGetter(object):
                     self.put_user_in_table(potential_influencer_id, potential_influencer_details)
                     influencers_found += 1
                     user = self._lmdb_manager.next_potential()
-                    time.sleep(10)
+                    time.sleep(2)
                 if influencers_found > 1000 or potential_influencer_id is None: finished = True
 
             except tweepy.RateLimitError:
                 self._handle_rate_limit()
+                user = self._lmdb_manager.next_potential()
             except:
                 logging.warn("could not put user: %s in table!", potential_influencer_id)
+                user = self._lmdb_manager.next_potential()
 
     def _handle_rate_limit(self):
         logging.info("Rate limit exceeded, waiting 15 minutes...")
