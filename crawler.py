@@ -1,58 +1,79 @@
 import time
+import logging
+
 import tweepy
 from tweepy import StreamListener, Stream
-from tweeter_crawler.crawler.authenticator import Authenticator
 
+from tweeter_crawler.crawler.authenticator import Authenticator
+from tweeter_crawler.crawler.lmdb_manager import LmdbManager
+from tweeter_crawler.crawler.thrift_hbase.hbase_writer import HBaseWriter
+
+logging.basicConfig(filename='c:/tmp/example.log',level=logging.DEBUG)
 
 class TwitterGetter(object):
-    def __init__(self, user_ids):
+    def __init__(self):
         self._api = tweepy.API(Authenticator.get_authentication_handler())
-        self._user_ids = user_ids
+        self._writer = HBaseWriter('Influencers')
+        self._lmdb_manager = LmdbManager('c:/tmp/influencers', 'c:/tmp/potentials')
 
-    def print_user_details(self, user):
-        print "Screen Name:" + user.screen_name
-        print "User Name:" + user.name
-        print "User Location:" + user.location
-        print "User Description:" + user.description
-        print "The Number Of Followers:" + str(user.followers_count)
-        print "The Number Of Friends:" + str(user.friends_count)
-        print "The Number Of Statuses:" + str(user.statuses_count)
-        print "User URL:" + str(user.url)
+    def put_user_in_table(self, user_id, user_details):
+        key = str(user_id)
+        details = "{}:{}:{}:{}:{}:{}:{}:{}".format(user_details.screen_name, user_details.name, user_details.location, user_details.description,
+                                                   user_details.followers_count,user_details.friends_count,
+                                                   user_details.statuses_count, user_details.url)
+
+        logging.info("User: %s details: %s", key, details)
+        self._writer.put(unicode(user_id), 'details', 'details', unicode(details))
 
 
-    def get_users_follower_friends_details(self):
-        for user_id in self._user_ids:
-            friends = self.get_friends_ids(user_id)
-            print "Friends:\n\n"
-            print "Number of friends: {}".format(len(friends))
-            # for friend in friends:
-            #     try:
-            #         self.print_user_details(self.get_user(friend))
-            #     except:
-            #         print "Hebrew"
+    def crawl(self):
 
-            followers = self.get_followers_ids(user_id)
-            print "Followers:\n\n"
-            print "Number of followers: {}".format((len(followers)))
-            # for follower in followers:
-            #     try:
-            #         self.print_user_details(self.get_user(follower))
-            #     except:
-            #         print "Hebrew"
+        finished = False
 
-    def get_friends_ids(self, user_id):
-        return self._api.friends_ids(user_id)
+        influencers_found = 0
 
-    def get_followers_ids(self, user_id):
-        followers = []
-        for page in tweepy.Cursor(self._api.followers_ids, screen_name=user_id).pages():
+        while not finished:
+            try:
+                potential_influencer_id, potential_influencer_details = self.get_user(self._lmdb_manager.next_potential())
+                if potential_influencer_id and self.is_influencer(potential_influencer_details) and not self._lmdb_manager.user_parsed(potential_influencer_id):
+                    self._lmdb_manager.move_to_influencers(potential_influencer_id)
+                    potentials = self.get_contacts_ids(potential_influencer_id, 'friends')
+                    self._lmdb_manager.log_new_potentials(potentials)
+                    self.put_user_in_table(potential_influencer_id, potential_influencer_details)
+                    influencers_found += 1
+
+                if influencers_found > 1000 or potential_influencer_id is None: finished = True
+
+            except tweepy.RateLimitError:
+                self._handle_rate_limit()
+            except:
+                logging.warn("could not put user: %s in table!", potential_influencer_id)
+
+    def create_initial_influencer(self, initial):
+        self._lmdb_manager.log_new_potentials([initial])
+
+    def _handle_rate_limit(self):
+        logging.info("Rate limit exceeded, waiting 15 minutes...")
+        time.sleep(60 * 15)
+
+    def get_contacts_ids(self, user_id, ids='followers'):
+        contacts = []
+        ids = self._api.followers_ids if ids == 'followers' else self._api.friends_ids
+        for page in tweepy.Cursor(ids, screen_name=user_id).pages():
+            contacts.extend(page)
+            logging.info("contacts current length for user %s is: %s",user_id ,(len(contacts)))
+            if len(contacts) > 5000:
+                break
             time.sleep(10)
-            print "current length: {}".format(len(followers))
-            followers.extend(page)
-        return followers
+        return contacts
 
     def get_user(self, user_id):
-        return self._api.get_user(user_id)
+        return user_id, self._api.get_user(user_id)
+
+    # need more logic here -.-
+    def is_influencer(self, user_details):
+        return 10000 <= user_details.followers_count <= 50000
+
 
 
 class TopicListener(StreamListener):
@@ -75,7 +96,8 @@ class TopicListener(StreamListener):
         print status_code
 
 if __name__ == '__main__':
-    twitter_getter = TwitterGetter(['therealguypines'])
-    twitter_getter.get_users_follower_friends_details()
+    twitter_getter = TwitterGetter()
+    twitter_getter.create_initial_influencer('therealguypines')
+    twitter_getter.crawl()
     #TopicListener(['Indiana', 'weather']).execute()
     #TopicListener([-86.33,41.63,-86.20,41.74]).execute(True)
