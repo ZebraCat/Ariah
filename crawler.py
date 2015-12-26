@@ -26,7 +26,7 @@ class TwitterGetter(object):
         self._writer.put(unicode(user_id), 'details', 'details', unicode(details))
 
 
-    def crawl(self):
+    def crawl(self, user):
 
         finished = False
 
@@ -34,14 +34,15 @@ class TwitterGetter(object):
 
         while not finished:
             try:
-                potential_influencer_id, potential_influencer_details = self.get_user(self._lmdb_manager.next_potential())
+                potential_influencer_id, potential_influencer_details = self.get_user(user)
                 if potential_influencer_id and self.is_influencer(potential_influencer_details) and not self._lmdb_manager.user_parsed(potential_influencer_id):
                     self._lmdb_manager.move_to_influencers(potential_influencer_id)
-                    potentials = self.get_contacts_ids(potential_influencer_id, 'friends')
+                    potentials = self._api.friends_ids(potential_influencer_id)
                     self._lmdb_manager.log_new_potentials(potentials)
                     self.put_user_in_table(potential_influencer_id, potential_influencer_details)
                     influencers_found += 1
-
+                    user = self._lmdb_manager.next_potential()
+                    time.sleep(10)
                 if influencers_found > 1000 or potential_influencer_id is None: finished = True
 
             except tweepy.RateLimitError:
@@ -49,55 +50,26 @@ class TwitterGetter(object):
             except:
                 logging.warn("could not put user: %s in table!", potential_influencer_id)
 
-    def create_initial_influencer(self, initial):
-        self._lmdb_manager.log_new_potentials([initial])
-
     def _handle_rate_limit(self):
         logging.info("Rate limit exceeded, waiting 15 minutes...")
         time.sleep(60 * 15)
 
-    def get_contacts_ids(self, user_id, ids='followers'):
-        contacts = []
-        ids = self._api.followers_ids if ids == 'followers' else self._api.friends_ids
-        for page in tweepy.Cursor(ids, screen_name=user_id).pages():
-            contacts.extend(page)
-            logging.info("contacts current length for user %s is: %s",user_id ,(len(contacts)))
-            if len(contacts) > 5000:
-                break
-            time.sleep(10)
-        return contacts
-
     def get_user(self, user_id):
-        return user_id, self._api.get_user(user_id)
+        if user_id:
+            return user_id, self._api.get_user(user_id)
+        else: return None, None
 
     # need more logic here -.-
     def is_influencer(self, user_details):
-        return 10000 <= user_details.followers_count <= 50000
+        return user_details.followers_count >= 2000
 
+    def start_from(self):
+        return self._lmdb_manager.next_potential()
 
-
-class TopicListener(StreamListener):
-    def __init__(self, filter_by):
-        self._auth = Authenticator.get_authentication_handler()
-        self._filter_by = filter_by
-
-    def execute(self, by_geo=False):
-        stream = Stream(self._auth, self)
-        if by_geo:
-            stream.filter(locations=self._filter_by)
-        else:
-            stream.filter(track=self._filter_by)
-
-    def on_data(self, raw_data):
-        print raw_data
-        return True
-
-    def on_error(self, status_code):
-        print status_code
 
 if __name__ == '__main__':
     twitter_getter = TwitterGetter()
-    twitter_getter.create_initial_influencer('therealguypines')
-    twitter_getter.crawl()
-    #TopicListener(['Indiana', 'weather']).execute()
-    #TopicListener([-86.33,41.63,-86.20,41.74]).execute(True)
+    potential  = twitter_getter.start_from()
+    if not potential:
+        potential = 'GameGrumps'
+    twitter_getter.crawl(potential)

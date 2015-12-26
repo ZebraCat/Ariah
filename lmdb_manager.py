@@ -15,8 +15,6 @@ class LmdbManager(object):
     def close(self):
         self._influencers_lmdb.close()
         self._potentials_lmdb.close()
-        self._influencers.close()
-        self._potentials.close()
 
     def user_parsed(self, user_id):
         return self._influencers.get(str(user_id)) is not None
@@ -27,35 +25,47 @@ class LmdbManager(object):
 
     def next_potential(self):
         key = None
-        for k,v in self._potentials.cursor():
+        cursor = self._potentials.cursor()
+        for k,v in cursor:
             key = k
             self._potentials.pop(k)
             break
-        self._potentials_lmdb.sync()
+        if key is not None:
+            self._potentials.commit()
+        cursor.close()
         return key
 
     def move_to_influencers(self, influencer_id):
-        self._influencers.put(str(influencer_id), 'influencer')
-        self._influencers_lmdb.sync()
+        cursor = self._influencers.cursor()
+        cursor.put(str(influencer_id), 'influencer')
+        cursor.close()
 
     def log_new_potentials(self, potentials):
+        cursor = self._potentials.cursor()
         for potential in potentials:
             if not self.already_potential(potential) and not self.user_parsed(potential):
-                self._potentials.put(str(potential), 'potential')
+                cursor.put(str(potential), 'potential')
 
-        self._potentials_lmdb.sync()
+        cursor.close()
+
+    def print_potentials(self):
+        cursor = self._influencers.cursor()
+        for k,v in cursor:
+            print k,v
 
 if __name__ == '__main__':
     m = LmdbManager('c:/tmp/influencers', 'c:/tmp/potentials')
     #time.sleep(3)
-    m.log_new_potentials([1,2,3])
-    k =  m.next_potential()
-    print k
-    m.move_to_influencers(k)
-    print m.already_potential(2)
-    print m.already_potential(3)
-    print m.already_potential(1)
-    print m.user_parsed(1)
-    print m.user_parsed(2)
-    print m.user_parsed(3)
+    #m.log_new_potentials([1,2,3])
+    #k =  m.next_potential()
+    #print k
+    #m.move_to_influencers(k)
+    # print m.already_potential(2)
+    # print m.already_potential(3)
+    # print m.already_potential(1)
+    # print m.user_parsed(1)
+    # print m.user_parsed(2)
+    # print m.user_parsed(3)
+    m.print_potentials()
+    m.close()
 
