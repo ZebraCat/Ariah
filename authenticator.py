@@ -11,15 +11,15 @@ class Authenticator(object):
     @classmethod
     def get_authentication_handler(cls):
         if not cls._auth:
-            parser.read('dev-props.cnf')
-
+            parser.read('../dev-props.cnf')
+            print parser.sections()
             consumer_key = parser.get('Consumer', 'consumer_key')
             consumer_secret = parser.get('Consumer', 'consumer_secret')
-            access_token = parser.get('AccessToken', 'access_token')
-            access_token_secret = parser.get('AccessToken', 'access_token_secret')
+            access_token = parser.get('TwitterAccessToken', 'access_token')
+            access_token_secret = parser.get('TwitterAccessToken', 'access_token_secret')
 
             auth = tweepy.OAuthHandler(consumer_key, consumer_secret)
             auth.set_access_token(access_token, access_token_secret)
-            _auth = auth
+            cls._auth = auth
 
-        return _auth
+        return cls._auth
